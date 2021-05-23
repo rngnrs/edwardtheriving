@@ -251,10 +251,10 @@ module.exports = class LinuxWireless {
 
 		output = output.map(string => {
 			let [_, bssid, ch, dbm, wps, lock, vendor, essid] = string.match(
-				/^((?:[0-9a-f]{2}:){5}[0-9a-f]{2}) {2,4}([0-9]{1,3}) {1,3}(-[0-9]{1,3}) +([12]\.0)? +(Yes|No)? +([a-z0-9]+) +(.+)$/i
+				/^((?:[0-9a-f]{2}:){5}[0-9a-f]{2}) {2,4}([0-9]{1,3}) {1,3}(-[0-9]{1,3}) +([12]\.0)? +(Yes|No)? +([a-z0-9]+)? +(.+)$/i
 			);
 			return {
-				bssid, ch, dbm, wps: wps ?? false, lock: lock ?? false, vendor, essid
+				bssid, ch, dbm, wps: wps ?? false, lock: lock ?? false, vendor: vendor ?? false, essid
 			};
 		})
 		return output;
