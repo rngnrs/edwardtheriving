@@ -17,4 +17,5 @@ It knows how to manage individual interfaces through methods available in the OS
 - `check`
 - `enable <interface> [managed|monitor]`
 - `disable <interface>`
+- `list <interface> [channel] [time]`
 - `help`

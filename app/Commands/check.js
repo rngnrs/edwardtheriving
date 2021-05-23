@@ -9,7 +9,6 @@ module.exports = class CheckCommand {
 	}
 
 	async run(options) {
-		await this.Wireless.checkPrerequisites('check');
 		let interfaces = await this.Wireless.listInterfaces();
 		if (!interfaces) {
 			throw new Error(this.Locale.getMessage('ENOAVAILABLEINTERFACES'));

@@ -1,51 +1,81 @@
-//const { spawn } = require('child_process');
+const { exec, spawn } = require('child_process');
 const util = require('util');
-const asyncExec = util.promisify(require('child_process').exec);
+const asyncExec = util.promisify(exec);
 
-//let nullFunc = () => {};
+let nullFunc = () => {};
 
 module.exports = class Execute {
 
-/*	#onmessage;
+	#onmessage;
 	#onerror;
-	#onclose;
-	#preHook;
-	#postHook;*/
+	#timeout;
 
-	constructor(args) {
-		if (typeof args === 'string') {
-			return Execute.async(args);
+	constructor({ cmd, options, onmessage, onerror, timeout } = {}) {
+		if (typeof arguments[0] === 'string') {
+			return Execute.async(arguments[0]);
 		}
 
-/*		let { cmd, options, preHook, onmessage, onerror, onclose, postHook } = args;
+		let opts = [];
+		if (typeof cmd !== 'string') {
+			throw new TypeError('cmd must be type of String');
+		}
+		cmd = cmd.split(' ');
+		[cmd, ...opts] = cmd;
+		if (typeof options === 'string') {
+			options = options.split(' ');
+		}
 		this.cmd = cmd;
-		this.options = options;
+		this.options = [...opts, ...options];
 
 		this.#onmessage = onmessage || nullFunc;
 		this.#onerror = onerror || nullFunc;
-		this.#onclose = onclose || nullFunc;
-		this.#preHook = preHook || nullFunc;
-		this.#postHook = postHook || nullFunc;*/
+		this.#timeout = timeout || null;
 	}
 
-/*
-	preHook() {
-		return this.#preHook();
+	#preHook(cmd) {
+		console.log('\x1BcEtR:', this.cmd, this.options.join(' '))
+		console.log('Press Ctrl-C to stop',
+			(this.#timeout
+				? `or we will do it after ${this.#timeout} ms`
+				: '') + '...');
+
+		let timeout;
+		if (this.#timeout) {
+			timeout = setTimeout(() => {
+				stopProcess();
+			}, this.#timeout);
+		}
+
+		function stopProcess() {
+			clearTimeout(timeout);
+			cmd.kill();
+			console.log('Stopping the process...');
+			process.off('SIGINT', stopProcess);
+			return false;
+		}
+
+		process.on('SIGINT', stopProcess);
 	}
 
-	hook() {
-		const cmd = spawn(this.cmd, this.options);
+	async run() {
+		return new Promise((resolve, reject) => {
+			let out = '';
+			const cmd = spawn(this.cmd, this.options);
+			this.#preHook(cmd);
 
-		cmd.stdout.on('data', this.#onmessage);
-		cmd.stderr.on('data', this.#onerror);
-		cmd.on('close', this.#onclose);
+			cmd.stdout.on('data', data => {
+				out += data.toString();
+				this.#onmessage(data.toString());
+			});
+			cmd.stderr.on('data', data => {
+				this.#onerror(data.toString());
+				return reject(cmd.stderr);
+			});
+			cmd.on('close', () => {
+				return resolve(out);
+			});
+		});
 	}
-
-	postHook() {
-		return this.#postHook();
-	}
-*/
-
 	/**
 	 * @param cmd
 	 * @returns {Promise<{stdout, stderr}>}

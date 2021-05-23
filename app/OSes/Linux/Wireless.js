@@ -8,17 +8,22 @@ module.exports = class LinuxWireless {
 			check: ['iw', 'awk'],
 			enable: ['sudo', 'nmcli', 'rfkill', 'ip'],
 			disable: ['sudo', 'nmcli', 'ip'],
-			put: ['sudo', 'iw'],
+			put: ['sudo', 'iw', 'nmcli', 'systemctl'],
+			getFreqs: ['iwlist'],
+			list: ['sudo', 'reaver'],
 
 			all: [
-				'iw', 'ip', //'iwconfig', 'ifconfig',
+				'iw', 'ip', 'iwlist', //'iwconfig', 'ifconfig',
 				'awk', //'grep',
-				'nmcli', 'rfkill', 'sudo'
+				'nmcli', 'rfkill', 'sudo',
+				'reaver'
 			]
 		}
 
 		this.Application = Application;
 		this.Locale = Locale;
+
+		this.interfaces = {};
 	}
 
 	async checkPrerequisites(cmd) {
@@ -74,7 +79,11 @@ module.exports = class LinuxWireless {
 				await Execute.async('rfkill unblock wlan');
 			}
 			if (Execute.satisfies(['nmcli'], this.satisfies)) {
-				await Execute.async('nmcli radio wifi on');
+				try {
+					await Execute.async('nmcli radio wifi on');
+				} catch {
+					// console.log('NetworkManager is not running.');
+				}
 			}
 			await Execute.async(this.requireSudo(`ip link set ${iface} up`));
 			return true;
@@ -89,7 +98,11 @@ module.exports = class LinuxWireless {
 
 		try {
 			if (Execute.satisfies(['nmcli'], this.satisfies)) {
-				await Execute.async('nmcli radio wifi off');
+				try {
+					await Execute.async('nmcli radio wifi off');
+				} catch {
+					console.log('NetworkManager is not running.');
+				}
 			}
 			await Execute.async(this.requireSudo(`ip link set ${iface} down`));
 			return true;
@@ -103,6 +116,9 @@ module.exports = class LinuxWireless {
 		await this.checkPrerequisites('put');
 
 		try {
+			if (Execute.satisfies(['nmcli', 'systemctl'], this.satisfies)) {
+				await Execute.async(this.requireSudo(`systemctl stop NetworkManager`));
+			}
 			await this.disableInterface(iface);
 			if (Execute.satisfies(['iw'], this.satisfies)) {
 				await Execute.async(this.requireSudo(`iw ${iface} set monitor control`));
@@ -124,10 +140,90 @@ module.exports = class LinuxWireless {
 				await Execute.async(this.requireSudo(`iw ${iface} set type managed`));
 			}
 			await this.enableInterface(iface);
+			if (Execute.satisfies(['nmcli', 'systemctl'], this.satisfies)) {
+				await Execute.async(this.requireSudo(`systemctl restart NetworkManager`));
+			}
 			return true;
 		} catch (e) {
 			console.log(e.message);
 			return false;
+		}
+	}
+
+	async getFrequencies(iface) {
+		await this.checkPrerequisites('getFreqs');
+
+		try {
+			let output = null;
+			this.interfaces[iface] = [];
+
+			if (Execute.satisfies(['iwlist'], this.satisfies)) {
+				output = await Execute.async(`iwlist ${iface} freq`);
+			}
+			if (!output) {
+				return [];
+			}
+			if (output.stdout.match(/Channel [0-9]{2} : 2\.4[0-9]+ GHz/)) {
+				this.interfaces[iface].push('2.4');
+			}
+			if (output.stdout.match(/Channel [0-9]{2,3} : 5\.[0-9]+ GHz/)) {
+				this.interfaces[iface].push('5');
+			}
+			return this.interfaces;
+		} catch (e) {
+			console.log(e.message);
+			return [];
+		}
+	}
+
+	async supports2GHz(iface) {
+		if (!this.interfaces[iface] || !this.interfaces[iface].length) {
+			await this.getFrequencies(iface);
+		}
+		return this.interfaces[iface].includes('2.4');
+	}
+
+	async supports5GHz(iface) {
+		if (!this.interfaces[iface] || !this.interfaces[iface].length) {
+			await this.getFrequencies(iface);
+		}
+		return this.interfaces[iface].includes('5');
+	}
+
+	async listNetworks(iface, channel, timeout = 0) {
+		// sudo wash -i $IFACE $fcs | tee /tmp/wash.all
+		// cat /tmp/wash.all | grep -E '[A-Fa-f0-9:]{11}' | cat -b
+		await this.checkPrerequisites('list');
+
+		try {
+			if (Execute.satisfies(['reaver'], this.satisfies)) {
+				let opts = ['-a'];
+				if (channel) {
+					opts.push('c ' + channel)
+				} else {
+					if (await this.supports2GHz(iface)) {
+						opts.push('2');
+					}
+					if (await this.supports5GHz(iface)) {
+						opts.push('5');
+					}
+				}
+				let cmd = this.requireSudo(`wash -i ${iface}`);
+				let wash = new Execute({
+					cmd,
+					options: opts.join(' -'),
+					onmessage: (args) => console.log(args.slice(0,-1)),
+					onerror: (args) => console.error(args),
+					timeout,
+				});
+
+				let networks = await wash.run();
+				return this.parseWashOutput(networks);
+			}
+			throw new Error(this.Locale.getMessage('NOPROGRAMTOEXECUTE'));
+		} catch (e) {
+			console.log(e);
+			return [];
 		}
 	}
 
@@ -138,12 +234,30 @@ module.exports = class LinuxWireless {
 			}
 			return cmd;
 		}
-		cmd = 'sudo ' + cmd;
+		if (this.Application.params.username !== 'root') {
+			cmd = 'sudo ' + cmd;
+		}
 		if (!this.sudo) {
 			console.log(this.Locale.getMessage('SUDOCHECK', cmd));
 		}
 		this.sudo = true;
 		return cmd;
+	}
+
+	parseWashOutput(output) {
+		output = output.split('\n');
+		output.splice(0, 2);
+		output.splice(-1, 1);
+
+		output = output.map(string => {
+			let [_, bssid, ch, dbm, wps, lock, vendor, essid] = string.match(
+				/^((?:[0-9a-f]{2}:){5}[0-9a-f]{2}) {2,4}([0-9]{1,3}) {1,3}(-[0-9]{1,3}) +([12]\.0)? +(Yes|No)? +([a-z0-9]+) +(.+)$/i
+			);
+			return {
+				bssid, ch, dbm, wps: wps ?? false, lock: lock ?? false, vendor, essid
+			};
+		})
+		return output;
 	}
 
 };
