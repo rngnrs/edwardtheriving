@@ -191,8 +191,6 @@ module.exports = class LinuxWireless {
 	}
 
 	async listNetworks(iface, channel, timeout = 0) {
-		// sudo wash -i $IFACE $fcs | tee /tmp/wash.all
-		// cat /tmp/wash.all | grep -E '[A-Fa-f0-9:]{11}' | cat -b
 		await this.checkPrerequisites('list');
 
 		try {
@@ -212,8 +210,8 @@ module.exports = class LinuxWireless {
 				let wash = new Execute({
 					cmd,
 					options: opts.join(' -'),
-					onmessage: (args) => console.log(args.slice(0,-1)),
-					onerror: (args) => console.error(args),
+					onmessage: data => console.log(data.slice(0,-1)),
+					onerror: data => console.error(data),
 					timeout,
 				});
 
